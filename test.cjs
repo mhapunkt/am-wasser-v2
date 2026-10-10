@@ -1,0 +1,23 @@
+const vm=require('node:vm'),fs=require('node:fs'),assert=require('node:assert/strict');
+const code=fs.readFileSync('index.html','utf8').match(/<script>([\s\S]*)<\/script>/)[1];
+function boot(data={}){let nodes=new Map(),handlers={};function element(){return {innerHTML:'',textContent:'',value:'',dataset:{},classList:{add(){},remove(){},toggle(){}},setAttribute(){},removeAttribute(){},focus(){},click(){},appendChild(el){this.innerHTML+=el.textContent},insertAdjacentHTML(pos,s){this.innerHTML=pos==='afterbegin'?s+this.innerHTML:this.innerHTML+s}}}const get=s=>{if(!nodes.has(s))nodes.set(s,element());return nodes.get(s)};let ctx={document:{querySelector:get,querySelectorAll:()=>[],addEventListener:(k,v)=>{(handlers[k]??=[]).push(v)},createElement:element},window:{scrollTo(){}},localStorage:{getItem:k=>data[k]??null,setItem:(k,v)=>data[k]=v},setTimeout:()=>0,clearTimeout(){},setInterval:()=>0,Blob,URL,console,confirm:()=>true};vm.createContext(ctx);vm.runInContext(code,ctx);return {run:s=>vm.runInContext(s,ctx),get,data,handlers}}
+let c=boot(),run=c.run;
+assert(c.get('#main').innerHTML.includes('spindelförmiger'));
+run('startExam()');assert.equal(run('quiz.ids.length'),60);assert.equal(run('new Set(quiz.ids).size'),60);assert.equal(run('quiz.deadline-quiz.startedAt'),7200000);assert.equal(run('GROUPS.every((g,i)=>quiz.ids.filter(id=>groupOf(byId(id))===i).length===12)'),true);
+run('answer(0);answer(1)');assert.equal(run('quiz.responses[quiz.ids[0]]'),1);assert.equal(run('events.length'),0);assert(!c.get('#main').innerHTML.includes('Richtig –'));assert(!c.get('#main').innerHTML.includes('Merksatz'));
+run('go("learn")');assert.equal(run('view'),'quiz');
+run('quiz.responses={};let seen=Array(5).fill(0);for(let id of quiz.ids){let q=byId(id),g=groupOf(q);quiz.responses[id]=seen[g]++<9?q.correct[0]:(q.correct[0]+1)%3}');assert.equal(run('assess(quiz.ids,quiz.responses).passed'),true);assert.equal(run('assess(quiz.ids,quiz.responses).right'),45);
+run('let bad=quiz.ids.find(id=>groupOf(byId(id))===0&&quiz.responses[id]===byId(id).correct[0]);quiz.responses[bad]=(byId(bad).correct[0]+1)%3');assert.equal(run('assess(quiz.ids,quiz.responses).passed'),false);
+run('for(let id of quiz.ids){let q=byId(id);if(groupOf(q)>0)quiz.responses[id]=q.correct[0]}');assert.equal(run('assess(quiz.ids,quiz.responses).right'),56);assert.equal(run('assess(quiz.ids,quiz.responses).passed'),false);
+run('finishRun("submitted");render();finishRun("submitted")');assert.equal(run('sessions.length'),1);assert.equal(run('events.length'),60);assert(c.get('#main').innerHTML.includes('Diesmal noch nicht bestanden'));
+run('validateBackup(stateData())');
+let resumed=boot(c.data);assert.equal(resumed.run('events.length'),60);assert.equal(resumed.run('sessions.length'),1);
+run('startExam();answer(2);store()');let c2=boot({...c.data});assert.equal(c2.run('quiz.responses[quiz.ids[0]]'),2);assert.equal(c2.run('quiz.deadline'),run('quiz.deadline'));
+c2.run('Date.now=()=>quiz.deadline+1;answer(0)');assert.equal(c2.run('quiz.done'),true);assert.equal(c2.run('sessions.at(-1).reason'),'timeout');assert.equal(c2.run('quiz.responses[quiz.ids[0]]'),2);assert.equal(c2.run('sessions.at(-1).result.right<=1'),true);
+run('finishRun("aborted");startQuiz([QUESTIONS[0]],1);answer((QUESTIONS[0].correct[0]+1)%3);quiz.done=true;render();startQuiz([QUESTIONS[0]],1);answer((QUESTIONS[0].correct[0]+1)%3);quiz.done=true;render()');assert.equal(run('difficulty(1).streak>=2'),true);assert(run('coaching(1)').includes('hintereinander'));
+run('startQuiz([QUESTIONS[0]],1);answer(QUESTIONS[0].correct[0])');assert.equal(run('difficulty(1).streak'),0);assert(run('coaching(1)').includes('Diesmal richtig'));
+let n=run('events.length');run('answer(0)');assert.equal(run('events.length'),n);
+run('finishRun();validateBackup(stateData());view="history";render()');assert(c.get('#main').innerHTML.includes('Dein Lernweg'));assert(c.get('#question-history').innerHTML.includes('Deine Antwort'));
+assert.throws(()=>run('validateBackup({version:2})'));
+let v1=boot({'am-wasser-v1':JSON.stringify({saved:[1],read:[0],stats:{1:{attempts:4,correct:2,last:false}}})});assert.equal(v1.run('events.length'),0);assert.equal(v1.run('stats[1].attempts'),4);assert(v1.data['am-wasser-v1']);
+console.log('PASS: 60 unique questions / 12 per subject; 120-min deadline; 45 pass; 56 with weak subject fails; answer editing; no solutions before submission; immutable/idempotent history; reload/resume; timeout; repeated-error coaching; recovery; import validation; separate V1 migration.');
